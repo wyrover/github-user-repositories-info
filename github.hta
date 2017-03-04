@@ -30,17 +30,48 @@
 <script language='vbscript'>
 
 
-
+Const COM_FSO           = "Scripting.FileSystemObject"
 Const ForAppending = 8
-Dim IE, txtFSO, txtFile, csvFSO, csvFile
+Dim IE, objFSO, txtFile, csvFile, csvForkerRepositoriesFile
 
+Sub ForceCreateFolder(dir)
+    On Error Resume Next
+    Dim FSO, dirpath
+    Set FSO = CreateObject(COM_FSO)
+    dirpath = FSO.GetAbsolutePathName(dir)
+    If (Not FSO.folderExists(FSO.GetParentFolderName(dirpath))) then
+        Call ForceCreateFolder(fso.GetParentFolderName(dirpath))
+    End If
 
-    
+    FSO.CreateFolder(dirpath)
+End Sub    
+
+'------------------------------------------------
+' 删除文件
+' 删除.txt文件，"C:\FSO\*.txt"
+Function DeleteFiles(filename)
+
+    Dim FSO
+    Set FSO = CreateObject(COM_FSO)
+
+    If FSO.FileExists(filename) Then
+        FSO.DeleteFile filename, True
+        DeleteFiles = True
+    Else
+        DeleteFiles = False
+    End If
+
+    Set FSO = Nothing
+
+End Function
+
     
 
 ' 窗体初始化时执行
 Sub Window_Onload()
-    window.resizeTo 400, 260
+    Set objFSO = CreateObject(COM_FSO)
+    ForceCreateFolder(".\data")
+    window.resizeTo 800, 600
     Set IE = CreateObject("InternetExplorer.Application") 
     With IE
       .AddressBar = True
@@ -56,9 +87,10 @@ Sub Window_Onload()
 End Sub
 
 ' 窗体卸载时执行
-Sub Window_OnUnload()	
+Sub Window_OnUnload()
     IE.Quit
     Set IE = Nothing
+    Set objFSO = Nothing
 End Sub
 
 Sub GetHtmlSource()
@@ -76,13 +108,25 @@ End Sub
 
 Function GetHtml(url)
     On Error Resume Next	
+    Dim content
 
     IE.Navigate url
     
     Do Until IE.ReadyState = 4
-    Loop
-        
-    GetHtml = IE.Document.body.outerHTML
+    Loop       
+
+    Set matches = GetMatches("(You\shave\striggered\san\sabuse\sdetection\smechanism)", IE.Document.body.outerHTML)
+    While matches.Count > 0 
+        MsgBox  "机器人"
+        IE.Navigate url
+        Do Until IE.ReadyState = 4
+        Loop        
+        Set matches = GetMatches("(You\shave\striggered\san\sabuse\sdetection\smechanism)", IE.Document.body.outerHTML)
+    Wend 
+    
+    content = IE.Document.body.outerHTML
+    
+    GetHtml = content   
 End Function 
 
 
@@ -97,141 +141,155 @@ Function GetMatches(pattern, text)
     Set GetMatches = objRegex.Execute(text)	
 End Function
 
+Sub GetUserRepositories()
+    Dim github_username
+    github_username = document.getElementById("github_username").value
+    Call GetUserRepositoriesByUsername(github_username, False)
+    MsgBox "链接地址获取完毕"
+End Sub
 
+Sub GetUserRepositoriesByUsername(github_username, isfork)
+    Dim url, html, matches, page_count, page_index   
 
-Sub GetUserLinks()
-    On Error Resume Next
-
-    Set txtFSO = CreateObject("Scripting.FileSystemObject")
-    Set csvFSO = CreateObject("Scripting.FileSystemObject")
-    Set txtFile = txtFSO.OpenTextFile _
-        ("github.html", ForAppending, True)
-
-    Set csvFile = csvFSO.OpenTextFile _
-        ("github.csv", ForAppending, True)
-        
-    txtFile.WriteLine("<html><body><table border=""1"">")
+    If Len(github_username) = 0 Then
+        Exit Sub
+    End If 
     
+    If isfork And github_username = "wyrover" Then    
+        Exit Sub    
+    End If
 
-    Dim url, url_user
-    url = "https://github.com/wyrover/Material-Movies/network/members"
-
-    Dim html
+    ' url = "https://github.com/wyrover/repositories"
+    url = "https://github.com/" & github_username & "/repositories"
     html = GetHtml(url)
+    Set matches = GetMatches(">(\d+)</a>\s<a\sclass=""next_page", html)
+    If matches.Count > 0 Then
+        For Each m In matches
+            If m.SubMatches.Count > 0 Then
+                page_count = CInt(m.SubMatches(0))    
+            End if
+        Next   
+    Else
+        page_count = 1
+    End If 
+
+    ' MsgBox page_count
+    
+    If Not isfork Then    
+        Dim html_filename, csv_filename
+        'html_filename = "data\" & github_username & "_github.html"
+        csv_filename = "data\" & github_username & "_github.txt"
+
+        Call DeleteFiles(html_filename)
+        Call DeleteFiles(csv_filename)
+
+'        Set txtFile = objFSO.OpenTextFile _
+'            (html_filename, ForAppending, True)
+
+        Set csvFile = objFSO.OpenTextFile _
+            (csv_filename, ForAppending, True)
+            
+'        txtFile.WriteLine("<html><body><table border=""1"">")
+        csvFile.WriteLine("link" & vbTab & "name" & vbTab & "description" & vbTab & "language" & vbTab & "forks" & vbTab & "datetime")
+    End If
+
+    page_index = 1    
+    ' base_url = "https://github.com/wyrover/repositories?page="
+    base_url = "https://github.com/" & github_username & "/repositories?page="
+
+    While page_index  <=  page_count        
+        url = base_url & CStr(page_index)        
+        Call GetLinks(url, isfork)
+        page_index = page_index + 1
+    Wend
+
+    If Not isfork Then
+'        txtFile.WriteLine("</table></body></html>")
+'        txtFile.Close
+        csvFile.Close  
+    End If        
+
+End Sub 
+
+Sub GetForkerRepositories()
+    Dim repository_url
+    repository_url = document.getElementById("repository_url").value
+    If Len(repository_url) = 0 Then
+        Exit Sub    
+    End If 
+
+    Dim basename, csvForkerRepositoriesFilename, htmlForkerRepositoriesFilename
+    basename = Mid(repository_url, InStrRev(repository_url, "/") + 1)
+    csvForkerRepositoriesFilename = ".\data\" & basename & ".txt"   
+    Call DeleteFiles(csvForkerRepositoriesFilename)
+
+
+    repository_url = repository_url & "/network/members"      
+
+    Set csvForkerRepositoriesFile = objFSO.OpenTextFile _
+        (csvForkerRepositoriesFilename, ForAppending, True)
+    csvForkerRepositoriesFile.WriteLine("link" & vbTab & "name" & vbTab & "description" & vbTab & "language" & vbTab & "forks" & vbTab & "datetime")
+    
+    Dim html
+    html = GetHtml(repository_url)
     
     Set matches = GetMatches("class=""repo""[^\b]+?<img[^\b]+?>[^\b]+?<img[^\b]+?>[^\b]+?<a\s+href=""(.*?)"">(.*?)</a>", html)
 
     If matches.Count > 0 Then
         For Each m In matches
             If m.SubMatches.Count > 0 Then
-                url_user = "https://github.com" & m.SubMatches(0) & "/repositories"
-                'url_user = "https://github.com" & m.SubMatches(0) & "?tab=repositories"                
-                GetUserAllRepo(url_user)
+                username = m.SubMatches(1)                       
+                Call GetUserRepositoriesByUsername(username, True)                
             End If
         Next
-    End If
+    End If  
 
-
-    txtFile.WriteLine("</table></body></html>")
-    txtFile.Close   
-    Set txtFSO = Nothing
-
-    csvFile.Close
-    Set csvFSO = Nothing
-    
-    MsgBox "链接地址获取完毕"	
-
-End Sub 
-
-
-Sub GetUserAllRepo(url)
-    Dim html, matches, page_count, page_index
-    page_count = 0
-    'url = "https://github.com/wyrover/repositories"
-    html = GetHtml(url)
-    Set matches = GetMatches(">(\d+)</a>\s<a\sclass=""next_page", html)
-    If matches.Count > 0 Then
-        For Each m In matches
-            If m.SubMatches.Count > 0 Then
-                page_count = CInt(m.SubMatches(0))    
-            End if
-        Next    
-    End If    
-
-    page_index = 1    
-    base_url = url & "?page="
-
-    While page_index  <=  page_count        
-        url = base_url & CStr(page_index)        
-        GetLinks(url)
-        page_index = page_index + 1
-    Wend 
+    csvForkerRepositoriesFile.Close   
+    MsgBox "链接地址获取完毕"
 
 End Sub
 
-Sub GetWyrover()
-    Dim url, html, matches, page_count, page_index
-    url = "https://github.com/wyrover/repositories"
-    html = GetHtml(url)
-    Set matches = GetMatches(">(\d+)</a>\s<a\sclass=""next_page", html)
-    If matches.Count > 0 Then
-        For Each m In matches
-            If m.SubMatches.Count > 0 Then
-                page_count = CInt(m.SubMatches(0))    
-            End if
-        Next    
-    End If 
-
-    MsgBox page_count
 
 
-    Set txtFSO = CreateObject("Scripting.FileSystemObject")
-    Set csvFSO = CreateObject("Scripting.FileSystemObject")
-    Set txtFile = txtFSO.OpenTextFile _
-        ("wyrover_github.html", ForAppending, True)
-
-    Set csvFile = csvFSO.OpenTextFile _
-        ("wyrover_github.csv", ForAppending, True)
-        
-    txtFile.WriteLine("<html><body><table border=""1"">")		
-
-    page_index = 1    
-    base_url = "https://github.com/wyrover/repositories?page="
-
-    While page_index  <=  page_count        
-        url = base_url & CStr(page_index)        
-        GetLinks(url)
-        page_index = page_index + 1
-    Wend
-
-
-    txtFile.WriteLine("</table></body></html>")
-    txtFile.Close   
-    Set txtFSO = Nothing
-
-    csvFile.Close
-    Set csvFSO = Nothing
-    
-    MsgBox "链接地址获取完毕"	
-    
-    
-    
-    
-    
-End Sub
-
-
-
-Sub GetLinks(url)
+Sub GetLinks(url, isfork)
     On Error Resume Next	
 
-    Set matches = GetMatches("class=""repo-list-stats"">([^\b]+?)<a[^\b]+?href="".*?"">([^\b]+?)</a>[^\b]+?<a[^\b]+?>([^\b]+?)</a>[^\b]+?<a[^\b]+?href=""(.*?)""[^\b]+?>([^\b]+?)</a>", GetHtml(url))
+    Set matches = GetMatches("<h3>[^\b]+?<a\s+href=""(.*?)""[^\b]+?>([^\b]+?)</a>[^\b]+?itemprop=""description"">([^\b]+?)</p>[^\b]+?itemprop=""programmingLanguage"">([^\b]+?)</span>[^\b]+?</svg>([^\b]+?)</a>[^\b]+?datetime=""(.*?)"">", GetHtml(url))
     
     If matches.Count > 0 Then
         For Each m In matches
             If m.SubMatches.Count > 0 Then
-                txtFile.WriteLine("<tr><td>" & ReplaceStr(m.SubMatches(0)) & "</td><td><a href=""https://github.com" & m.SubMatches(3) & """>" & ReplaceStr(m.SubMatches(4)) & "</a></td><td>" & ReplaceStr(m.SubMatches(1)) & "</td><td>" & ReplaceStr(m.SubMatches(2)) & "</td></tr>")
-                csvFile.WriteLine(ReplaceStr(m.SubMatches(0)) & "," & "https://github.com" & m.SubMatches(3) & "," & ReplaceStr(m.SubMatches(4)) & "," & ReplaceStr(m.SubMatches(1)) & "," & ReplaceStr(m.SubMatches(2)))
+
+
+'                txtFile.Write("<tr>")
+'                txtFile.Write("<td><a href=""" & m.SubMatches(0) & """>" & ReplaceStr(m.SubMatches(1)) & "</a></td>")
+'                txtFile.Write("<td>" & ReplaceStr(m.SubMatches(2)) & "</td>")   
+'                txtFile.Write("<td>" & ReplaceStr(m.SubMatches(3)) & "</td>")  
+'                txtFile.Write("<td>" & ReplaceStr(m.SubMatches(4)) & "</td>")  
+'                txtFile.Write("<td>" & ReplaceDateTime(m.SubMatches(5)) & "</td>")  
+'                txtFile.Write("</tr>")
+
+
+                csvFile.Write("https://github.com" & m.SubMatches(0) & vbTab)   ' link
+                csvFile.Write(ReplaceStr(m.SubMatches(1)) & vbTab)              ' name    
+                csvFile.Write(ReplaceStr(m.SubMatches(2)) & vbTab)              ' description
+                csvFile.Write(ReplaceStr(m.SubMatches(3)) & vbTab)              ' language
+                csvFile.Write(ReplaceStr(m.SubMatches(4)) & vbTab)              ' forks
+                csvFile.Write(ReplaceDateTime(m.SubMatches(5)))                 ' datetime
+                csvFile.Write(Chr(13))
+
+                If isfork Then     
+                    
+                    csvForkerRepositoriesFile.Write("https://github.com" & m.SubMatches(0) & vbTab)
+                    csvForkerRepositoriesFile.Write(ReplaceStr(m.SubMatches(1)) & vbTab)
+                    csvForkerRepositoriesFile.Write(ReplaceStr(m.SubMatches(2)) & vbTab)
+                    csvForkerRepositoriesFile.Write(ReplaceStr(m.SubMatches(3)) & vbTab)
+                    csvForkerRepositoriesFile.Write(ReplaceStr(m.SubMatches(4)) & vbTab)
+                    csvForkerRepositoriesFile.Write(ReplaceDateTime(m.SubMatches(5)))
+                    csvForkerRepositoriesFile.Write(Chr(13))
+                
+                End If
+
             End If
         Next
     End If
@@ -252,7 +310,18 @@ Function RemoveHTML( strText )
     RegEx.Pattern = "<[^>]*>"
     RegEx.Global = True
     RemoveHTML = RegEx.Replace(strText, "")
+End Function 
+
+Function ReplaceDouhao(message)
+    ReplaceDouhao = Replace(message, ",", "")
+End Function 
+
+Function ReplaceDateTime(message)
+    message = Replace(message, "T", " ")
+    ReplaceDateTime = Replace(message, "Z", "")
 End Function
+
+
 
 
 
@@ -270,11 +339,16 @@ End Function
 
 
 
-<fieldset id="pnlInfo">	
-    起始页：<input type="text" id="txtPage1">
-    终止页：<input type="text" id="txtPage2">
-    <input type="button" value="获取某个仓库Forkers所有仓库" onClick="GetUserLinks()">
-    <input type="button" value="获取wyrover所有仓库" onclick="GetWyrover()">
+<fieldset id="pnlInfo">
+    <label>github 用户名</label><input type="text" id="github_username"><br>
+    <input type="button" value="获取用户所有仓库" onclick="GetUserRepositories()"><br>
+
+    <label>github 仓库地址</label><input type="text" id="repository_url" style="width: 350px"><br>
+    <label>示例: https://github.com/wyrover/android-open-project</label><br>
+    <input type="button" value="获取仓库 fork 者的所有仓库" onclick="GetForkerRepositories()"><br>
+
+
+
     <input type="button" value="获取页面html" onclick="GetHtmlSource()">
     <textarea cols="80" rows="2" id="txtOutput" height="5"></textarea>
 </fieldset>
