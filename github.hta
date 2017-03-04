@@ -1,0 +1,298 @@
+<html>
+<head>
+    <title>github数据采集</title>
+    <HTA:APPLICATION
+        APPLICATIONNAME	= 'MyWowo'
+        ID						= 'oTestApp'
+        BORDER				= 'Thin'
+        BORDERSTYLE			= 'Sunken'
+        CAPTION				= 'Yes'
+        CONTEXTMENU			= 'No'
+        ICON					= '.\Icon.ico'
+        INNERBORDER			= 'No'
+        MAXIMIZEBUTTON		= 'No'
+        MINIMIZEBUTTON		= 'No'
+        NAVIGABLE			= 'No'
+        SCROLL				= 'No'
+        SCROLLFLAT			= 'No'
+        SELECTION			= 'Yes'
+        SHOWINTASKBAR		= 'Yes'
+        SINGLEINSTANCE		= 'No'
+        SYSMENU				= 'Yes'
+        VERSION				= '1.0'
+        WINDOWSTATE			= 'Normal'>
+        <meta http-equiv="Content-Language" content="zh-cn">
+        <meta http-equiv="Content-Type" content="text/html; charset=gb2312">
+</head>
+
+
+<script type="text/vbscript" src="clsThief.vbs"></script>
+<script language='vbscript'>
+
+
+
+Const ForAppending = 8
+Dim IE, txtFSO, txtFile, csvFSO, csvFile
+
+
+    
+    
+
+' 窗体初始化时执行
+Sub Window_Onload()
+    window.resizeTo 400, 260
+    Set IE = CreateObject("InternetExplorer.Application") 
+    With IE
+      .AddressBar = True
+      .menubar = True
+      .ToolBar = True
+      .StatusBar = True
+      .width = 800
+      .height = 600
+      .resizable = True
+      .visible = True
+    End With
+
+End Sub
+
+' 窗体卸载时执行
+Sub Window_OnUnload()	
+    IE.Quit
+    Set IE = Nothing
+End Sub
+
+Sub GetHtmlSource()
+    On Error Resume Next
+    Dim url
+    url = "https://github.com/wyrover/repositories?page=1"
+
+    IE.Navigate url
+    
+    Do Until IE.ReadyState = 4
+    Loop
+        
+    document.getElementById("txtOutput").value = IE.Document.body.outerHTML
+End Sub 
+
+Function GetHtml(url)
+    On Error Resume Next	
+
+    IE.Navigate url
+    
+    Do Until IE.ReadyState = 4
+    Loop
+        
+    GetHtml = IE.Document.body.outerHTML
+End Function 
+
+
+Function GetMatches(pattern, text)
+    Dim objRegex
+    Set objRegex = New RegExp
+    objRegex.Global = True
+    objRegex.IgnoreCase = True
+    objRegex.MultiLine = True
+
+    objRegex.Pattern = pattern
+    Set GetMatches = objRegex.Execute(text)	
+End Function
+
+
+
+Sub GetUserLinks()
+    On Error Resume Next
+
+    Set txtFSO = CreateObject("Scripting.FileSystemObject")
+    Set csvFSO = CreateObject("Scripting.FileSystemObject")
+    Set txtFile = txtFSO.OpenTextFile _
+        ("github.html", ForAppending, True)
+
+    Set csvFile = csvFSO.OpenTextFile _
+        ("github.csv", ForAppending, True)
+        
+    txtFile.WriteLine("<html><body><table border=""1"">")
+    
+
+    Dim url, url_user
+    url = "https://github.com/wyrover/Material-Movies/network/members"
+
+    Dim html
+    html = GetHtml(url)
+    
+    Set matches = GetMatches("class=""repo""[^\b]+?<img[^\b]+?>[^\b]+?<img[^\b]+?>[^\b]+?<a\s+href=""(.*?)"">(.*?)</a>", html)
+
+    If matches.Count > 0 Then
+        For Each m In matches
+            If m.SubMatches.Count > 0 Then
+                url_user = "https://github.com" & m.SubMatches(0) & "/repositories"
+                'url_user = "https://github.com" & m.SubMatches(0) & "?tab=repositories"                
+                GetUserAllRepo(url_user)
+            End If
+        Next
+    End If
+
+
+    txtFile.WriteLine("</table></body></html>")
+    txtFile.Close   
+    Set txtFSO = Nothing
+
+    csvFile.Close
+    Set csvFSO = Nothing
+    
+    MsgBox "链接地址获取完毕"	
+
+End Sub 
+
+
+Sub GetUserAllRepo(url)
+    Dim html, matches, page_count, page_index
+    page_count = 0
+    'url = "https://github.com/wyrover/repositories"
+    html = GetHtml(url)
+    Set matches = GetMatches(">(\d+)</a>\s<a\sclass=""next_page", html)
+    If matches.Count > 0 Then
+        For Each m In matches
+            If m.SubMatches.Count > 0 Then
+                page_count = CInt(m.SubMatches(0))    
+            End if
+        Next    
+    End If    
+
+    page_index = 1    
+    base_url = url & "?page="
+
+    While page_index  <=  page_count        
+        url = base_url & CStr(page_index)        
+        GetLinks(url)
+        page_index = page_index + 1
+    Wend 
+
+End Sub
+
+Sub GetWyrover()
+    Dim url, html, matches, page_count, page_index
+    url = "https://github.com/wyrover/repositories"
+    html = GetHtml(url)
+    Set matches = GetMatches(">(\d+)</a>\s<a\sclass=""next_page", html)
+    If matches.Count > 0 Then
+        For Each m In matches
+            If m.SubMatches.Count > 0 Then
+                page_count = CInt(m.SubMatches(0))    
+            End if
+        Next    
+    End If 
+
+    MsgBox page_count
+
+
+    Set txtFSO = CreateObject("Scripting.FileSystemObject")
+    Set csvFSO = CreateObject("Scripting.FileSystemObject")
+    Set txtFile = txtFSO.OpenTextFile _
+        ("wyrover_github.html", ForAppending, True)
+
+    Set csvFile = csvFSO.OpenTextFile _
+        ("wyrover_github.csv", ForAppending, True)
+        
+    txtFile.WriteLine("<html><body><table border=""1"">")		
+
+    page_index = 1    
+    base_url = "https://github.com/wyrover/repositories?page="
+
+    While page_index  <=  page_count        
+        url = base_url & CStr(page_index)        
+        GetLinks(url)
+        page_index = page_index + 1
+    Wend
+
+
+    txtFile.WriteLine("</table></body></html>")
+    txtFile.Close   
+    Set txtFSO = Nothing
+
+    csvFile.Close
+    Set csvFSO = Nothing
+    
+    MsgBox "链接地址获取完毕"	
+    
+    
+    
+    
+    
+End Sub
+
+
+
+Sub GetLinks(url)
+    On Error Resume Next	
+
+    Set matches = GetMatches("class=""repo-list-stats"">([^\b]+?)<a[^\b]+?href="".*?"">([^\b]+?)</a>[^\b]+?<a[^\b]+?>([^\b]+?)</a>[^\b]+?<a[^\b]+?href=""(.*?)""[^\b]+?>([^\b]+?)</a>", GetHtml(url))
+    
+    If matches.Count > 0 Then
+        For Each m In matches
+            If m.SubMatches.Count > 0 Then
+                txtFile.WriteLine("<tr><td>" & ReplaceStr(m.SubMatches(0)) & "</td><td><a href=""https://github.com" & m.SubMatches(3) & """>" & ReplaceStr(m.SubMatches(4)) & "</a></td><td>" & ReplaceStr(m.SubMatches(1)) & "</td><td>" & ReplaceStr(m.SubMatches(2)) & "</td></tr>")
+                csvFile.WriteLine(ReplaceStr(m.SubMatches(0)) & "," & "https://github.com" & m.SubMatches(3) & "," & ReplaceStr(m.SubMatches(4)) & "," & ReplaceStr(m.SubMatches(1)) & "," & ReplaceStr(m.SubMatches(2)))
+            End If
+        Next
+    End If
+End Sub 
+
+
+Function ReplaceStr(message)    
+    message = RemoveHTML(message)
+    message = Replace(message, Chr(13), "")
+    message = Replace(message, Chr(10), "")
+    message = Trim(message)
+    ReplaceStr = message
+End Function 
+
+Function RemoveHTML( strText )
+    Dim RegEx
+    Set RegEx = New RegExp
+    RegEx.Pattern = "<[^>]*>"
+    RegEx.Global = True
+    RemoveHTML = RegEx.Replace(strText, "")
+End Function
+
+
+
+
+</script>
+
+
+<body>
+
+
+
+
+
+
+
+
+
+<fieldset id="pnlInfo">	
+    起始页：<input type="text" id="txtPage1">
+    终止页：<input type="text" id="txtPage2">
+    <input type="button" value="获取某个仓库Forkers所有仓库" onClick="GetUserLinks()">
+    <input type="button" value="获取wyrover所有仓库" onclick="GetWyrover()">
+    <input type="button" value="获取页面html" onclick="GetHtmlSource()">
+    <textarea cols="80" rows="2" id="txtOutput" height="5"></textarea>
+</fieldset>
+
+
+
+
+</body>
+
+</html>
+
+
+<STYLE>
+    BODY		{background-color: buttonface; font-family: tahoma, verdana, 宋体; font-size: 9pt; margin: 1px 1px 1px 1px;}
+    button	{font-family: tahoma;	font-size: 8pt;}
+    textarea	{font-family: tahoma;	font-size: 9pt;}
+    select	{font-family: tahoma;	font-size: 9pt;}
+    td			{font-family: tahoma;	font-size: 9pt;}
+    input, select		{font-family: tahoma;	font-size: 9pt; margin: 5px 5px 5px 5px;}
+    #ProgressBar1, #pnlProgress, #pnlInfo {margin-top: 5px;}	
+</STYLE>
